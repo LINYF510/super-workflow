@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "skills": {
+    "brainstorming": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "computedHash": "efddfd0efbd0e7b5075c5a66ff91a706ac506c88c7b5ddd7fd45a351cb3fe3af"
+    },
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "computedHash": "d31e234f0c90694a670222cdd1dafa853e051d7066beda389f1097c22dadd461"
+    },
+    "requirements-analysis": {
+      "source": "jwynia/agent-skills",
+      "sourceType": "github",
+      "computedHash": "7f84e4803f4f94264c8019c2343e83ef78e8ea6c66eabca21305c817a704ef33"
+    }
+  }
+}
