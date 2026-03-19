@@ -1,7 +1,7 @@
 /**
- * iflow agents 命令
+ * sw agents 命令
  * 
- * 查看智能体
+ * 查看智能体，支持树形结构和深度显示
  */
 
 import { Command } from 'commander';
@@ -10,19 +10,21 @@ import { table } from 'table';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { initDatabase, closeDatabase, AgentRepository } from '../../services/storage/index.js';
+import type { Agent } from '../../types/index.js';
 
 export const agentsCommand = new Command('agents')
   .description('查看智能体')
   .option('-t, --tree', '显示树形结构')
   .option('-s, --status <status>', '按状态过滤 (active|idle|terminated)')
+  .option('-d, --depth <number>', '按深度过滤')
   .option('-j, --json', 'JSON 格式输出')
-  .action((options: { tree?: boolean; status?: string; json?: boolean }) => {
+  .action((options: { tree?: boolean; status?: string; depth?: string; json?: boolean }) => {
     try {
       // 初始化数据库
       const iflowDir = join(process.cwd(), '.iflow');
       if (!existsSync(iflowDir)) {
         console.log(chalk.red('未找到项目配置目录 .iflow/'));
-        console.log(chalk.gray('请先运行 iflow init <project-name> 初始化项目'));
+        console.log(chalk.gray('请先运行 sw init <project-name> 初始化项目'));
         process.exit(1);
       }
       
@@ -34,6 +36,12 @@ export const agentsCommand = new Command('agents')
       // 状态过滤
       if (options.status) {
         agents = agents.filter(a => a.status === options.status);
+      }
+      
+      // 深度过滤
+      if (options.depth) {
+        const depth = parseInt(options.depth, 10);
+        agents = agents.filter(a => a.depth === depth);
       }
       
       closeDatabase();
@@ -64,19 +72,20 @@ export const agentsCommand = new Command('agents')
 /**
  * 打印智能体表格
  */
-function printAgentTable(agents: ReturnType<AgentRepository['findAll']>): void {
+function printAgentTable(agents: Agent[]): void {
   if (agents.length === 0) {
     console.log(chalk.gray('暂无智能体'));
     return;
   }
   
   const data = [
-    ['ID', '名称', '角色', '状态', '技能数'],
+    ['ID', '名称', '角色', '状态', '深度', '技能数'],
     ...agents.map(agent => [
       agent.id.substring(0, 8),
       agent.name,
       agent.role,
       formatStatus(agent.status),
+      String(agent.depth),
       String(agent.skills.length),
     ]),
   ];
@@ -88,7 +97,7 @@ function printAgentTable(agents: ReturnType<AgentRepository['findAll']>): void {
 /**
  * 打印智能体树
  */
-function printAgentTree(agents: ReturnType<AgentRepository['findAll']>): void {
+function printAgentTree(agents: Agent[]): void {
   if (agents.length === 0) {
     console.log(chalk.gray('暂无智能体'));
     return;
@@ -97,6 +106,10 @@ function printAgentTree(agents: ReturnType<AgentRepository['findAll']>): void {
   console.log();
   console.log(chalk.bold('智能体树:'));
   
+  const maxDepth = Math.max(...agents.map(a => a.depth));
+  console.log(chalk.gray(`最大深度: ${maxDepth}/5`));
+  console.log();
+  
   const printNode = (parentId: string | null, indent: string = '') => {
     const children = agents.filter(a => a.parentId === parentId);
     for (const child of children) {
@@ -104,8 +117,9 @@ function printAgentTree(agents: ReturnType<AgentRepository['findAll']>): void {
       const isLast = index === children.length - 1;
       const prefix = isLast ? '└── ' : '├── ';
       const status = formatStatusDot(child.status);
+      const depthInfo = chalk.gray(`[L${child.depth}]`);
       
-      console.log(`${indent}${prefix}${status} ${child.name} (${child.role})`);
+      console.log(`${indent}${prefix}${status} ${child.name} (${child.role}) ${depthInfo}`);
       
       const childIndent = indent + (isLast ? '    ' : '│   ');
       printNode(child.id, childIndent);
@@ -113,6 +127,12 @@ function printAgentTree(agents: ReturnType<AgentRepository['findAll']>): void {
   };
   
   printNode(null);
+  
+  // 统计信息
+  console.log();
+  console.log(chalk.gray(`总计: ${agents.length} 个智能体`));
+  console.log(chalk.gray(`  活跃: ${agents.filter(a => a.status === 'active').length}`));
+  console.log(chalk.gray(`  空闲: ${agents.filter(a => a.status === 'idle').length}`));
   console.log();
 }
 

@@ -1,15 +1,18 @@
 /**
- * iflow chat 命令
+ * sw chat 命令
  * 
- * 与智能体交互
+ * 与智能体交互，集成 AI 能力
  */
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import ora from 'ora';
 import inquirer from 'inquirer';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { initDatabase, closeDatabase, AgentRepository, MessageRepository } from '../../services/storage/index.js';
+import { AICapabilityProvider } from '../../services/iflow/index.js';
+import type { Agent } from '../../types/index.js';
 
 export const chatCommand = new Command('chat')
   .description('与智能体交互')
@@ -84,10 +87,17 @@ export const chatCommand = new Command('chat')
  * 对话循环
  */
 async function chatLoop(
-  agent: ReturnType<AgentRepository['findById']>,
+  agent: Agent,
   messageRepo: MessageRepository
 ): Promise<void> {
-  if (!agent) return;
+  // 初始化 AI 能力
+  let aiProvider: AICapabilityProvider | null = null;
+  try {
+    aiProvider = new AICapabilityProvider();
+    await aiProvider.connect();
+  } catch (error) {
+    console.log(chalk.yellow('AI 服务连接失败，将使用离线模式'));
+  }
   
   while (true) {
     const { input } = await inquirer.prompt([
@@ -115,12 +125,48 @@ async function chatLoop(
     });
     
     console.log();
-    console.log(chalk.gray(`[${new Date().toLocaleTimeString()}] 消息已发送`));
     
-    // 模拟智能体响应
-    // TODO: 实际调用智能体处理逻辑
-    console.log(chalk.green(`${agent.name}:`));
-    console.log(chalk.gray('收到您的消息，正在处理中...'));
-    console.log();
+    // 使用 AI 处理
+    if (aiProvider && agent.systemPrompt) {
+      const spinner = ora('思考中...').start();
+      try {
+        const response = await aiProvider.executeWithRole(
+          {
+            name: agent.name,
+            description: agent.role,
+            responsibilities: agent.responsibilities,
+            skills: agent.skills,
+            systemPrompt: agent.systemPrompt,
+          },
+          input,
+          {
+            agentId: agent.id,
+            summary: `你是一个 ${agent.role}，负责 ${agent.responsibilities.join('、')}`,
+          }
+        );
+        spinner.stop();
+        
+        console.log(chalk.green(`${agent.name}:`));
+        console.log(response);
+        console.log();
+        
+        // 保存回复
+        messageRepo.create({
+          fromAgent: agent.id,
+          toAgent: 'user',
+          type: 'response',
+          content: { text: response },
+        });
+      } catch (error) {
+        spinner.fail(chalk.red('处理失败'));
+        console.error(error);
+      }
+    } else {
+      // 离线模式
+      console.log(chalk.green(`${agent.name}:`));
+      console.log(chalk.gray('收到您的消息。当前处于离线模式，无法提供智能回复。'));
+      console.log(chalk.gray('请确保 iFlow CLI 已安装并运行。'));
+      console.log();
+    }
   }
 }

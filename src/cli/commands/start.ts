@@ -1,7 +1,7 @@
 /**
- * iflow start 命令
+ * sw start 命令
  * 
- * 启动主智能体
+ * 启动主智能体，集成 AI 能力
  */
 
 import { Command } from 'commander';
@@ -12,6 +12,7 @@ import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import { initDatabase, closeDatabase } from '../../services/storage/index.js';
 import { Orchestrator } from '../../core/orchestrator/index.js';
+import { AICapabilityProvider } from '../../services/iflow/index.js';
 
 export const startCommand = new Command('start')
   .description('启动主智能体')
@@ -75,6 +76,17 @@ export const startCommand = new Command('start')
  * 交互模式
  */
 async function interactiveMode(orchestrator: Orchestrator): Promise<void> {
+  // 初始化 AI 能力
+  const aiSpinner = ora('连接 AI 服务...').start();
+  try {
+    const aiProvider = new AICapabilityProvider();
+    await aiProvider.connect();
+    aiSpinner.succeed(chalk.green('AI 服务已连接'));
+  } catch (error) {
+    aiSpinner.warn(chalk.yellow('AI 服务连接失败，将使用备用分析模式'));
+  }
+  
+  console.log();
   console.log(chalk.bold('主智能体已就绪，请告诉我您要做什么？'));
   console.log(chalk.gray('输入 "help" 查看帮助，"exit" 退出'));
   console.log();
@@ -118,47 +130,79 @@ async function interactiveMode(orchestrator: Orchestrator): Promise<void> {
       continue;
     }
     
-    // 分析需求
+    // 分析需求（使用 AI 能力）
     if (input.trim()) {
-      console.log();
-      console.log(chalk.gray('📋 正在分析需求...'));
-      
-      try {
-        const analysis = await orchestrator.analyzeProject(input);
-        
-        console.log();
-        console.log(chalk.bold('识别结果:'));
-        console.log(chalk.gray(`  行业领域: ${analysis.industry}`));
-        console.log(chalk.gray(`  建议职位: ${analysis.roles.map(r => r.name).join(', ')}`));
-        console.log();
-        
-        const { createOrg } = await inquirer.prompt([
-          {
-            type: 'confirm',
-            name: 'createOrg',
-            message: '是否创建组织架构？',
-            default: true,
-          },
-        ]);
-        
-        if (createOrg) {
-          const agents = await orchestrator.createOrganization(analysis);
-          
-          console.log();
-          console.log(chalk.bold.green('✓ 组织架构创建成功'));
-          console.log(chalk.gray(`  已创建 ${agents.length} 个智能体`));
-          console.log();
-          
-          showAgentTree(orchestrator);
+      await handleRequirementAnalysis(orchestrator, input.trim());
+    }
+    
+    console.log();
+  }
+}
+
+/**
+ * 处理需求分析
+ */
+async function handleRequirementAnalysis(orchestrator: Orchestrator, description: string): Promise<void> {
+  const spinner = ora('📋 正在分析需求...').start();
+  
+  try {
+    const analysis = await orchestrator.analyzeProject(description);
+    spinner.succeed(chalk.green('分析完成'));
+    
+    console.log();
+    console.log(chalk.bold('识别结果:'));
+    console.log(chalk.gray(`  行业领域: ${analysis.industry}`));
+    console.log(chalk.gray(`  建议职位: ${analysis.roles.map(r => r.name).join(', ')}`));
+    
+    if (analysis.orgStructure) {
+      console.log(chalk.gray(`  组织架构: ${analysis.orgStructure}`));
+    }
+    
+    if (analysis.suggestedWorkflows.length > 0) {
+      console.log(chalk.gray(`  建议工作流: ${analysis.suggestedWorkflows.join(', ')}`));
+    }
+    
+    console.log();
+    
+    // 显示角色详情
+    if (analysis.roles.length > 0) {
+      console.log(chalk.bold('角色详情:'));
+      for (const role of analysis.roles) {
+        const indent = role.parent ? '    └─ ' : '  ';
+        const bullet = role.parent ? '' : '● ';
+        console.log(chalk.gray(`${indent}${bullet}${role.name}: ${role.description}`));
+        if (role.requiredSkills.length > 0) {
+          console.log(chalk.gray(`${indent}    技能: ${role.requiredSkills.join(', ')}`));
         }
-        
+      }
+      console.log();
+    }
+    
+    const { createOrg } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'createOrg',
+        message: '是否创建组织架构？',
+        default: true,
+      },
+    ]);
+    
+    if (createOrg) {
+      const createSpinner = ora('创建组织架构...').start();
+      try {
+        const agents = await orchestrator.createOrganization(analysis);
+        createSpinner.succeed(chalk.green(`组织架构创建成功，已创建 ${agents.length} 个智能体`));
+        console.log();
+        showAgentTree(orchestrator);
       } catch (error) {
-        console.log(chalk.red('分析失败'));
+        createSpinner.fail(chalk.red('创建失败'));
         console.error(error);
       }
     }
     
-    console.log();
+  } catch (error) {
+    spinner.fail(chalk.red('分析失败'));
+    console.error(error);
   }
 }
 
