@@ -1,19 +1,26 @@
 # Super Workflow - 动态工作流系统设计文档
 
-**版本**: 1.0.0  
-**日期**: 2026-03-18  
+**版本**: 2.0.0  
+**日期**: 2026-03-19  
 **状态**: 设计阶段
 
 ## 概述
 
-Super Workflow 是一个基于 iFlow CLI 的动态工作流系统，参考 swarm-ide 的"液态拓扑"理念，实现按需生成智能体、动态分配任务、自动发现技能的完整工作流管理方案。
+Super Workflow 是一个基于 iFlow SDK 的动态工作流系统，参考 swarm-ide 的"液态拓扑"理念，实现按需生成智能体、动态分配任务、自动发现技能的完整工作流管理方案。
 
 ### 核心理念
 
-- **按需递归生成** — 主智能体根据需求动态创建子智能体，子智能体可继续创建下级
+- **按需递归生成** — 主智能体根据需求动态创建子智能体，子智能体可继续创建下级（最多5层）
 - **虚拟公司模型** — 模拟真实组织架构，每个智能体对应一个"职位"
 - **原子化分解** — 任务分解到可独立执行的粒度
 - **自动技能发现** — 根据职位需求自动查找并安装相关 skills
+- **AI 能力集成** — 通过 iFlow SDK 获得多模型 AI 推理、工具执行、文件操作等核心能力
+
+### 系统定位
+
+Super Workflow 采用**混合架构**：
+- **自己实现**：智能体管理、组织架构树、Workflow 引擎、通信机制、持久化存储
+- **iFlow SDK 提供**：AI 推理、工具调用、文件/Shell/网络操作、流式响应、Token 管理
 
 ---
 
@@ -29,52 +36,111 @@ Super Workflow 是一个基于 iFlow CLI 的动态工作流系统，参考 swarm
           │                │                │
           ▼                ▼                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    核心引擎层                                │
+│                 Super Workflow 核心层                        │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
 │  │ 主智能体管理 │  │ 动态智能体  │  │ Workflow     │       │
 │  │ (Orchestrator)│  │ 创建/调度   │  │ 执行引擎     │       │
 │  └──────────────┘  └──────────────┘  └──────────────┘       │
-└─────────────────────────────────────────────────────────────┘
-          │                │                │
-          ▼                ▼                ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    服务层（可选）                            │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │ 状态管理     │  │ 任务队列    │  │ 智能体通信   │       │
-│  │ (SQLite)     │  │ (内存/持久) │  │ (消息总线)   │       │
+│  │ MessageBus   │  │ Task Queue  │  │ SQLite 存储  │       │
+│  │ 通信机制     │  │ 任务调度    │  │ 持久化       │       │
 │  └──────────────┘  └──────────────┘  └──────────────┘       │
 └─────────────────────────────────────────────────────────────┘
-          │                │                │
-          ▼                ▼                ▼
+          │
+          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    存储层                                    │
+│                    iFlow SDK 能力层                          │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │ .iflow/      │  │ skills/     │  │ workspaces/  │       │
-│  │ (配置/状态)  │  │ (技能库)    │  │ (项目数据)   │       │
+│  │ 多模型 AI    │  │ 工具调用系统 │  │ 文件操作     │       │
+│  │ 推理能力     │  │              │  │              │       │
+│  └──────────────┘  └──────────────┘  └──────────────┘       │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │ Shell 执行   │  │ 网络功能    │  │ 流式响应     │       │
+│  │              │  │ web_search   │  │ Token 管理   │       │
+│  └──────────────┘  └──────────────┘  └──────────────┘       │
+└─────────────────────────────────────────────────────────────┘
+          │
+          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    外部服务                                  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │ Claude API   │  │ GPT API     │  │ 其他 LLM     │       │
+│  │ (iFlow 代理) │  │ (iFlow 代理)│  │ (iFlow 代理) │       │
 │  └──────────────┘  └──────────────┘  └──────────────┘       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ### 核心概念
 
-| 概念 | 说明 |
-|------|------|
-| **Orchestrator** | 主智能体，系统入口点，负责理解需求、分析行业、分配任务 |
-| **Agent** | 智能体，对应一个"职位"，拥有职责、workflow 和 skills |
-| **Workflow** | 工作流，定义智能体如何执行任务，包含步骤、依赖、skill 调用 |
-| **Skill** | 技能单元，原子化能力，通过 `npx skills` 动态获取 |
+| 概念 | 说明 | 实现方 |
+|------|------|--------|
+| **Orchestrator** | 主智能体，系统入口点，负责理解需求、分析行业、分配任务 | Super Workflow |
+| **Agent** | 智能体，对应一个"职位"，拥有职责、workflow 和 skills | Super Workflow |
+| **AgentTree** | 智能体树，管理递归嵌套的父子关系（最多5层） | Super Workflow |
+| **Workflow** | 工作流，定义智能体如何执行任务 | Super Workflow |
+| **MessageBus** | 消息总线，智能体间通信机制 | Super Workflow |
+| **IFlowClient** | AI 能力客户端，提供推理、工具调用等核心能力 | iFlow SDK |
+| **Skill** | 技能单元，原子化能力 | skills.sh 生态 |
 
-### 架构模式
+### 职责划分
 
-采用**混合架构**：CLI 内核 + 可选服务模式。
-
-- **默认模式**：纯文件驱动，所有配置存储在 `.iflow/` 目录
-- **服务模式**：可选启动本地服务，增强状态管理和多任务并行能力
-- **数据库**：嵌入式 SQLite，无需额外部署
+| 功能模块 | Super Workflow 负责 | iFlow SDK 负责 |
+|----------|---------------------|----------------|
+| 智能体数据结构 | ✅ | - |
+| 组织架构树管理 | ✅ | - |
+| 递归创建子智能体 | ✅ | - |
+| Workflow YAML 解析 | ✅ | - |
+| 步骤执行器 | ✅ | - |
+| MessageBus 通信 | ✅ | - |
+| SQLite 持久化 | ✅ | - |
+| 任务队列调度 | ✅ | - |
+| AI 推理 | - | ✅ |
+| 工具调用 | - | ✅ |
+| 文件操作 | - | ✅ |
+| Shell 执行 | - | ✅ |
+| 网络搜索 | - | ✅ |
+| Token 管理 | - | ✅ |
 
 ---
 
-## 二、目录结构
+## 二、系统要求
+
+### 运行环境
+
+| 组件 | 版本要求 | 说明 |
+|------|----------|------|
+| Node.js | >= 22.0 | iFlow SDK 要求 |
+| iFlow CLI | >= 0.2.24 | 提供 AI 能力 |
+| SQLite | 内置 | 无需额外安装 |
+| 操作系统 | Windows/macOS/Linux | 跨平台支持 |
+
+### 依赖安装
+
+```bash
+# 安装 iFlow CLI
+npm install -g @iflow-ai/iflow-cli
+
+# 安装 iFlow SDK
+npm install @iflow-ai/iflow-cli-sdk
+
+# 安装项目依赖
+npm install
+```
+
+### 认证配置
+
+```bash
+# 方式1: iFlow 平台登录（推荐）
+iflow
+# 选择 "Login with iFlow"
+
+# 方式2: API Key 登录
+# 访问心流平台生成 API Key
+```
+
+---
+
+## 三、目录结构
 
 ```
 super-workflow/
@@ -101,110 +167,174 @@ super-workflow/
 │       ├── org-structure.md     # 组织架构文档
 │       └── outputs/             # 各智能体输出产物
 │
+├── src/
+│   ├── cli/                     # CLI 命令
+│   ├── core/
+│   │   ├── orchestrator/        # 主智能体
+│   │   ├── agent/               # 智能体管理
+│   │   ├── workflow/            # 工作流引擎
+│   │   └── communication/       # 消息总线
+│   ├── services/
+│   │   ├── iflow/               # iFlow SDK 集成
+│   │   ├── skill/               # Skill 服务
+│   │   └── storage/             # 存储服务
+│   └── types/                   # 类型定义
+│
 ├── skills-lock.json             # skills 依赖锁定
-└── package.json                 # 项目依赖
+├── package.json
+└── tsconfig.json
 ```
 
 ---
 
-## 三、数据持久化
+## 四、iFlow SDK 集成方案
 
-### 持久化层级
+### 架构设计
 
-| 层级 | 数据类型 | 存储方式 | 生命周期 |
-|------|----------|----------|----------|
-| 静态配置 | 智能体定义、workflow、skills | 文件系统 | 永久 |
-| 项目数据 | 需求文档、输出产物 | 文件系统 | 永久 |
-| 运行时状态 | 任务进度、消息记录、执行历史 | SQLite | 会话级/项目级 |
-| 缓存数据 | skill 搜索结果、行业模板缓存 | SQLite + 内存 | 临时 |
+```typescript
+// src/services/iflow/client.ts
+import { IFlowClient, MessageType } from '@iflow-ai/iflow-cli-sdk';
 
-### 数据库表结构
+/**
+ * AI 能力适配器
+ * 
+ * 将 iFlow SDK 封装为 Super Workflow 需要的接口
+ */
+export class AICapabilityProvider {
+  private client: IFlowClient;
+  
+  constructor() {
+    // 不配置 agents，只用基础 AI 能力
+    // 智能体管理由 Super Workflow 自己实现
+    this.client = new IFlowClient({
+      timeout: 60000,
+      logLevel: 'INFO',
+    });
+  }
+  
+  /**
+   * AI 分析需求，生成角色定义
+   */
+  async analyzeRequirements(description: string): Promise<RoleDefinition[]> {
+    await this.client.connect();
+    
+    const prompt = this.buildAnalysisPrompt(description);
+    await this.client.sendMessage(prompt);
+    
+    const response = await this.collectResponse();
+    
+    return this.parseRoleDefinitions(response);
+  }
+  
+  /**
+   * 执行任务（带角色上下文）
+   */
+  async executeWithRole(
+    role: RoleDefinition,
+    task: string,
+    context: AgentContext
+  ): Promise<string> {
+    await this.client.connect();
+    
+    const prompt = `
+你现在扮演: ${role.name}
+职责: ${role.responsibilities.join(', ')}
+专业技能: ${role.skills.join(', ')}
 
-```sql
--- 智能体表
-CREATE TABLE agents (
-    id TEXT PRIMARY KEY,
-    name TEXT,
-    role TEXT,           -- 职位名称
-    parent_id TEXT,      -- 上级智能体
-    status TEXT,         -- active/idle/terminated
-    workflow_path TEXT,  -- workflow 文件路径
-    skills TEXT,         -- JSON array
-    created_at TIMESTAMP,
-    metadata TEXT        -- JSON
-);
+上下文:
+${context.summary}
 
--- 任务表
-CREATE TABLE tasks (
-    id TEXT PRIMARY KEY,
-    agent_id TEXT,
-    parent_task_id TEXT,
-    title TEXT,
-    description TEXT,
-    status TEXT,         -- pending/running/completed/failed
-    priority INTEGER,
-    created_at TIMESTAMP,
-    started_at TIMESTAMP,
-    completed_at TIMESTAMP,
-    result TEXT          -- JSON output
-);
+任务: ${task}
+`;
+    
+    await this.client.sendMessage(prompt);
+    return await this.collectResponse();
+  }
+  
+  /**
+   * 调用 Skill
+   */
+  async invokeSkill(
+    skillName: string,
+    input: Record<string, unknown>
+  ): Promise<SkillOutput> {
+    await this.client.connect();
+    
+    await this.client.sendMessage(`
+请使用 ${skillName} skill 执行以下任务：
+${JSON.stringify(input, null, 2)}
+`);
+    
+    const response = await this.collectResponse();
+    return this.parseSkillOutput(response);
+  }
+  
+  private async collectResponse(): Promise<string> {
+    let result = '';
+    for await (const msg of this.client.receiveMessages()) {
+      if (msg.type === MessageType.ASSISTANT && msg.chunk.text) {
+        result += msg.chunk.text;
+      } else if (msg.type === MessageType.TASK_FINISH) {
+        break;
+      }
+    }
+    return result;
+  }
+}
+```
 
--- 消息表
-CREATE TABLE messages (
-    id TEXT PRIMARY KEY,
-    from_agent TEXT,
-    to_agent TEXT,
-    type TEXT,           -- task_assign/status_update/result_report
-    content TEXT,
-    created_at TIMESTAMP
-);
+### AI 能力调用流程
 
--- 执行检查点
-CREATE TABLE checkpoints (
-    id TEXT PRIMARY KEY,
-    task_id TEXT,
-    step_index INTEGER,
-    state TEXT,          -- JSON snapshot
-    created_at TIMESTAMP
-);
-
--- Skill 缓存
-CREATE TABLE skill_cache (
-    query TEXT PRIMARY KEY,
-    results TEXT,
-    cached_at TIMESTAMP,
-    expires_at TIMESTAMP
-);
+```
+Super Workflow 发起请求
+        │
+        ▼
+┌───────────────────┐
+│ AICapabilityProvider
+│ - analyzeRequirements()
+│ - executeWithRole()
+│ - invokeSkill()
+└─────────┬─────────┘
+          │
+          ▼
+┌───────────────────┐
+│   IFlowClient     │
+│   (SDK)           │
+└─────────┬─────────┘
+          │
+          ▼
+┌───────────────────┐
+│   iFlow CLI       │
+│   - AI 推理       │
+│   - 工具调用      │
+│   - 文件操作      │
+└───────────────────┘
 ```
 
 ---
 
-## 四、动态智能体生成流程
+## 五、动态智能体生成流程
+
+### 完整流程
 
 ```
 用户输入项目需求
         │
         ▼
 ┌───────────────────┐
-│  主智能体分析需求  │
-│  - 识别行业领域    │
-│  - 分析工作流程    │
-│  - 分解职位角色    │
+│  AI 分析需求      │  ← iFlow SDK
+│  生成角色定义     │
 └─────────┬─────────┘
           │
           ▼
 ┌───────────────────┐
-│  生成组织架构文档  │
-└─────────┬─────────┘
-          │
-          ▼
-┌───────────────────┐
-│  创建第一层子智能体│
+│  创建 AgentTree   │  ← Super Workflow
+│  建立父子关系     │
 └─────────┬─────────┘
           │
     ┌─────┴─────┐
     │  循环处理  │
-    │  每个职位  │
+    │  每个角色  │
     └─────┬─────┘
           │
     ┌─────┴─────────────────┐
@@ -225,12 +355,113 @@ CREATE TABLE skill_cache (
        └────────────────────┘
                 │
                 ▼
+┌───────────────────────────┐
+│ 存入 SQLite               │
+│ - agents 表               │
+│ - 建立 parent_id 关联     │
+└───────────────────────────┘
+                │
+                ▼
         ┌─────────────────┐
         │ 智能体准备就绪  │
         └─────────────────┘
 ```
 
-### Agent 定义格式
+### AI 生成角色定义
+
+```typescript
+// 分析提示词模板
+const ANALYSIS_PROMPT = `
+分析以下项目需求，生成所需的团队角色配置。
+
+项目描述：
+{project_description}
+
+请以 JSON 格式输出角色定义：
+[
+  {
+    "name": "角色名称",
+    "description": "角色描述",
+    "responsibilities": ["职责1", "职责2"],
+    "skills": ["技能1", "技能2"],
+    "systemPrompt": "详细的系统提示，定义这个角色应该如何工作",
+    "parent": "上级角色名称（如果有）",
+    "children": ["下级角色名称（如果需要）"]
+  }
+]
+
+规则：
+1. 角色应该按照真实组织架构设计
+2. 每个角色应该有明确的职责边界
+3. 嵌套层级不超过5层
+4. 只输出 JSON，不要其他内容
+`;
+
+// AI 返回示例
+const roleDefinitions = [
+  {
+    "name": "技术主管",
+    "description": "负责技术架构和团队管理",
+    "responsibilities": ["技术架构设计", "代码审查", "技术决策", "团队协调"],
+    "skills": ["brainstorming", "requesting-code-review", "systematic-debugging"],
+    "systemPrompt": "你是一个经验丰富的技术主管...",
+    "parent": null,
+    "children": ["前端开发", "后端开发", "测试工程师"]
+  },
+  {
+    "name": "前端开发",
+    "description": "负责用户界面开发",
+    "responsibilities": ["UI开发", "前端性能优化", "与后端API对接"],
+    "skills": ["vercel-react-best-practices", "typescript-advanced-types"],
+    "systemPrompt": "你是一个专业的前端开发工程师...",
+    "parent": "技术主管",
+    "children": []
+  }
+];
+```
+
+### AgentTree 数据结构
+
+```typescript
+interface AgentNode {
+  id: string;
+  role: RoleDefinition;
+  parentId: string | null;
+  children: AgentNode[];
+  status: 'idle' | 'busy' | 'waiting';
+  currentTask: Task | null;
+}
+
+class AgentTree {
+  private root: AgentNode;
+  private nodeMap: Map<string, AgentNode>;
+  private maxDepth: number = 5;
+  
+  // 创建智能体节点
+  createAgent(role: RoleDefinition, parentId: string | null): AgentNode;
+  
+  // 递归创建子树
+  createSubtree(parentId: string, roles: RoleDefinition[]): void;
+  
+  // 查找智能体
+  findAgent(id: string): AgentNode | null;
+  
+  // 获取层级
+  getDepth(agentId: string): number;
+  
+  // 获取所有下属
+  getDescendants(agentId: string): AgentNode[];
+  
+  // 获取上级链
+  getAncestors(agentId: string): AgentNode[];
+}
+```
+
+---
+
+## 六、Agent 定义格式
+
+### agent.yaml
 
 ```yaml
 # agent.yaml
@@ -239,6 +470,7 @@ name: 前端开发工程师
 role: frontend-developer
 parent: tech-lead-001
 status: idle
+depth: 2                    # 在树中的层级
 
 responsibilities:
   - 实现用户界面组件
@@ -247,17 +479,45 @@ responsibilities:
 
 skills:
   - brainstorming
-  - react-best-practices
-  - testing
+  - vercel-react-best-practices
+  - typescript-advanced-types
 
 workflow: .iflow/agents/frontend-dev-001/workflow.yaml
 
-created_at: 2026-03-18T10:00:00Z
+# AI 角色上下文
+systemPrompt: |
+  你是一个专业的前端开发工程师...
+  
+created_at: 2026-03-19T10:00:00Z
+```
+
+### SQLite 存储
+
+```sql
+-- 智能体表（增加层级字段）
+CREATE TABLE agents (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    role TEXT,
+    parent_id TEXT,
+    depth INTEGER,        -- 层级深度
+    status TEXT,
+    workflow_path TEXT,
+    skills TEXT,          -- JSON array
+    system_prompt TEXT,   -- AI 角色上下文
+    created_at TIMESTAMP,
+    metadata TEXT,
+    FOREIGN KEY (parent_id) REFERENCES agents(id)
+);
+
+-- 创建索引
+CREATE INDEX idx_agents_parent ON agents(parent_id);
+CREATE INDEX idx_agents_depth ON agents(depth);
 ```
 
 ---
 
-## 五、Workflow 执行引擎
+## 七、Workflow 执行引擎
 
 ### Workflow YAML 格式
 
@@ -281,14 +541,13 @@ inputs:
 steps:
   - id: analyze
     name: 分析需求
-    skill: requirements-analysis
     action: invoke_skill
+    skill: requirements-analysis
     input:
       description: ${inputs.task_description}
     output:
       analyzed_requirements: result.requirements
       sub_tasks: result.sub_tasks
-    on_failure: report_to_parent
 
   - id: check_complexity
     name: 检查任务复杂度
@@ -310,8 +569,8 @@ steps:
 
   - id: execute_directly
     name: 直接开发
-    skill: frontend-development
     action: invoke_skill
+    skill: frontend-development
     input:
       requirements: ${analyze.output.analyzed_requirements}
     next: report_completion
@@ -339,41 +598,159 @@ error_handling:
   escalation_threshold: 2
 ```
 
-### 执行引擎能力
+### 执行器实现
 
-| 能力 | 说明 |
-|------|------|
-| 变量插值 | `${inputs.xxx}`, `${steps.id.output.xxx}` |
-| 条件分支 | `condition` + `on_true/on_false` |
-| 并行执行 | 无依赖的步骤可并行 |
-| 子任务等待 | `wait_for_completion` 控制 |
-| 错误重试 | 可配置重试次数和回退策略 |
-| 断点续传 | 通过 checkpoints 表保存中间状态 |
+```typescript
+// src/core/workflow/executor.ts
+import { AICapabilityProvider } from '../../services/iflow/client.js';
 
-### 执行状态机
-
-```
-pending → running → completed
-    │         │
-    │         ├──→ failed → retry → running
-    │         │
-    │         └──→ paused → resume → running
-    │
-    └──→ cancelled
+export class WorkflowExecutor {
+  private aiProvider: AICapabilityProvider;
+  private agentTree: AgentTree;
+  private messageBus: MessageBus;
+  
+  async executeStep(step: WorkflowStep, context: WorkflowContext): Promise<StepOutput> {
+    switch (step.action) {
+      case 'invoke_skill':
+        return this.executeInvokeSkill(step, context);
+      
+      case 'evaluate':
+        return this.executeEvaluate(step, context);
+      
+      case 'create_agents':
+        return this.executeCreateAgents(step, context);
+      
+      case 'aggregate':
+        return this.executeAggregate(step, context);
+      
+      case 'send_message':
+        return this.executeSendMessage(step, context);
+      
+      default:
+        throw new Error(`Unknown action: ${step.action}`);
+    }
+  }
+  
+  private async executeInvokeSkill(
+    step: WorkflowStep,
+    context: WorkflowContext
+  ): Promise<StepOutput> {
+    const agent = this.agentTree.findAgent(context.agentId);
+    
+    // 使用 iFlow SDK 执行 skill
+    const output = await this.aiProvider.invokeSkill(
+      step.skill!,
+      this.interpolateInput(step.input, context)
+    );
+    
+    // 存储到 SQLite
+    this.saveStepOutput(context.taskId, step.id, output);
+    
+    return output;
+  }
+  
+  private async executeCreateAgents(
+    step: WorkflowStep,
+    context: WorkflowContext
+  ): Promise<StepOutput> {
+    const childOutputs: string[] = [];
+    
+    for (const agentDef of step.agents || []) {
+      // 检查层级限制
+      const parent = this.agentTree.findAgent(context.agentId);
+      if (parent && this.agentTree.getDepth(parent.id) >= 5) {
+        throw new Error('Maximum agent depth (5) exceeded');
+      }
+      
+      // AI 生成角色定义
+      const role = await this.aiProvider.analyzeRequirements(
+        `需要创建角色: ${agentDef.role}, 任务: ${agentDef.tasks}`
+      ).then(roles => roles[0]);
+      
+      // 创建智能体节点
+      const agent = this.agentTree.createAgent(role, context.agentId);
+      
+      // 存储到 SQLite
+      this.agentRepo.create({
+        id: agent.id,
+        name: role.name,
+        role: role.name,
+        parentId: context.agentId,
+        systemPrompt: role.systemPrompt,
+        skills: JSON.stringify(role.skills),
+      });
+      
+      // 分配任务
+      if (step.waitForCompletion) {
+        const output = await this.executeChildWorkflow(agent.id, agentDef.tasks);
+        childOutputs.push(output);
+      } else {
+        // 异步执行
+        this.messageBus.send({
+          from: context.agentId,
+          to: agent.id,
+          type: 'task_assign',
+          content: agentDef.tasks,
+        });
+      }
+    }
+    
+    return { childOutputs };
+  }
+}
 ```
 
 ---
 
-## 六、智能体通信机制
+## 八、智能体通信机制
 
-### 核心原语
+### MessageBus 实现
 
-| 原语 | 说明 |
-|------|------|
-| `create_agent` | 创建子智能体 |
-| `send_message` | 向任意智能体发送消息 |
-| `broadcast` | 广播消息给所有下属 |
-| `query_status` | 查询智能体状态 |
+```typescript
+// src/core/communication/bus.ts
+export class MessageBus {
+  private agents: Map<string, AgentMessageHandler>;
+  private messageHistory: MessageRepository;
+  
+  // 发送消息
+  async send(message: AgentMessage): Promise<void> {
+    // 存储消息
+    await this.messageHistory.save(message);
+    
+    // 路由到目标智能体
+    const handler = this.agents.get(message.to);
+    if (handler) {
+      await handler.handleMessage(message);
+    }
+  }
+  
+  // 广播给所有下属
+  async broadcast(fromAgentId: string, content: string): Promise<void> {
+    const descendants = this.agentTree.getDescendants(fromAgentId);
+    for (const agent of descendants) {
+      await this.send({
+        from: fromAgentId,
+        to: agent.id,
+        type: 'broadcast',
+        content,
+      });
+    }
+  }
+  
+  // 向上汇报
+  async reportUp(fromAgentId: string, type: string, content: string): Promise<void> {
+    const ancestors = this.agentTree.getAncestors(fromAgentId);
+    if (ancestors.length > 0) {
+      await this.send({
+        from: fromAgentId,
+        to: ancestors[0]!.id,
+        type,
+        content,
+      });
+    }
+  }
+}
+```
 
 ### 消息类型
 
@@ -389,21 +766,13 @@ pending → running → completed
 | `query` | 任意 → 任意 | 信息查询 |
 | `response` | 任意 → 任意 | 查询响应 |
 
-### 通信规则
-
-1. **默认向上汇报** — 任务状态、进度自动上报
-2. **允许同级协作** — 同级智能体可直接通信
-3. **用户可介入任意节点** — 用户可以与任何智能体直接对话
-4. **请求-响应模式** — 非紧急消息使用异步请求-响应
-5. **紧急广播** — `broadcast` 可快速通知所有相关方
-
 ---
 
-## 七、Skill 自动发现与安装
+## 九、Skill 自动发现与安装
 
 ### 发现流程
 
-1. 分析职位所需技能（基于 role + responsibilities）
+1. AI 分析职位所需技能
 2. 检查本地已安装 skills（skills-lock.json）
 3. 缺失 skill → 构建搜索关键词
 4. 执行 `npx skills find {keywords}`
@@ -411,81 +780,74 @@ pending → running → completed
 6. 自动安装 `npx skills add {selected} -y`
 7. 更新 skills-lock.json
 
-### Skill 映射模板
+### Skill 服务实现
 
-```yaml
-skill_mapping:
-  前端开发:
-    keywords: [react, vue, frontend, css, typescript]
-    essential_skills:
-      - vercel-labs/agent-skills@react-best-practices
-      - vercel-labs/agent-skills@typescript
-    optional_skills:
-      - vercel-labs/agent-skills@tailwind
-      - vercel-labs/agent-skills@testing
+```typescript
+// src/services/skill/finder.ts
+import { execSync } from 'child_process';
 
-  后端开发:
-    keywords: [backend, api, database, server]
-    essential_skills:
-      - vercel-labs/agent-skills@api-design
-      - vercel-labs/agent-skills@database
-
-  产品经理:
-    keywords: [product, requirements, roadmap]
-    essential_skills:
-      - jwynia/agent-skills@requirements-analysis
-
-  测试工程师:
-    keywords: [testing, qa, e2e, unit-test]
-    essential_skills:
-      - vercel-labs/agent-skills@testing
-
-  common_skills:
-    - obra/superpowers@brainstorming
+export class SkillFinder {
+  // 搜索 skill
+  async find(query: string): Promise<SkillSearchResult[]> {
+    const result = execSync(`npx skills find "${query}" --json`, {
+      encoding: 'utf-8',
+    });
+    
+    return JSON.parse(result);
+  }
+  
+  // 过滤结果
+  filterSkills(results: SkillSearchResult[]): SkillSearchResult[] {
+    return results.filter(skill => {
+      // 安装量 >= 100
+      if (skill.installs < 100) return false;
+      
+      // 来源可信
+      const trustedSources = ['vercel-labs', 'obra', 'anthropic', 'jwynia'];
+      const isTrusted = trustedSources.some(
+        src => skill.package.includes(src)
+      );
+      if (!isTrusted) return false;
+      
+      // 匹配度 >= 0.7
+      if (skill.score < 0.7) return false;
+      
+      return true;
+    });
+  }
+}
 ```
-
-### 质量过滤条件
-
-| 条件 | 阈值 | 说明 |
-|------|------|------|
-| 安装量 | >= 100 | 排除冷门 skill |
-| 来源可信 | vercel-labs, obra 等 | 优先官方来源 |
-| 匹配度 | >= 0.7 | 关键词相似度 |
-| 安全评分 | Low Risk | 参考 skills.sh 评估 |
 
 ---
 
-## 八、CLI 命令设计
+## 十、CLI 命令设计
 
 ### 核心命令
 
 ```bash
 # 项目管理
-iflow init <project-name>           # 初始化新项目
-iflow start [--project <name>]      # 启动主智能体
+sw init <project-name>              # 初始化新项目
+sw start [--project <name>]         # 启动主智能体
 
 # 智能体管理
-iflow agents [--tree] [--status]    # 查看智能体
-iflow chat <agent-id>               # 与智能体交互
+sw agents [--tree] [--status]       # 查看智能体树
+sw chat <agent-id>                  # 与智能体交互
 
 # 任务管理
-iflow assign <agent-id> "任务"      # 分配任务
-iflow tasks [--agent] [--status]    # 查看任务
+sw assign <agent-id> "任务"         # 分配任务
+sw tasks [--agent] [--status]       # 查看任务
 
 # 消息
-iflow messages [--agent]            # 查看消息历史
-
-# 服务模式
-iflow serve [--port]                # 启动后端服务
+sw messages [--agent]               # 查看消息历史
 
 # 导出
-iflow export [--format]             # 导出项目配置
+sw export [--format]                # 导出项目配置
 ```
 
 ### 交互模式示例
 
 ```
-$ iflow start
+$ sw start
 
 🚀 Super Workflow 启动
 📦 项目: my-app (电商平台)
@@ -493,13 +855,14 @@ $ iflow start
 ┌─ 主智能体 ─────────────────────────────────────────┐
 │ 我已分析您的电商项目需求，识别出以下职位：         │
 │                                                     │
-│  组织架构:                                          │
-│  ├─ 技术主管                                        │
-│  │  ├─ 前端开发                                     │
-│  │  ├─ 后端开发                                     │
-│  │  └─ 测试工程师                                   │
-│  ├─ 产品经理                                        │
-│  └─ 设计主管                                        │
+│  组织架构树:                                        │
+│  主智能体 (depth: 0)                               │
+│  └─ 技术主管 (depth: 1)                            │
+│     ├─ 前端开发 (depth: 2)                         │
+│     ├─ 后端开发 (depth: 2)                         │
+│     └─ 测试工程师 (depth: 2)                       │
+│  ├─ 产品经理 (depth: 1)                            │
+│  └─ 设计主管 (depth: 1)                            │
 │                                                     │
 │ 已自动安装 6 个相关 skills                          │
 │ 请告诉我您要做什么？                                │
@@ -514,72 +877,141 @@ $ iflow start
 
 ---
 
-## 九、UI 扩展设计
+## 十一、数据持久化
 
-### API 接口
+### 持久化层级
 
-```yaml
-# REST API
-POST   /api/projects                 # 创建项目
-GET    /api/projects/:id             # 获取项目信息
-GET    /api/projects/:id/agents      # 获取智能体列表
-POST   /api/agents                   # 创建智能体
-POST   /api/agents/:id/tasks         # 分配任务
-GET    /api/tasks/:id                # 获取任务状态
-POST   /api/messages                 # 发送消息
-GET    /api/messages                 # 获取消息列表
+| 层级 | 数据类型 | 存储方式 | 生命周期 |
+|------|----------|----------|----------|
+| 静态配置 | 智能体定义、workflow、skills | 文件系统 | 永久 |
+| 项目数据 | 需求文档、输出产物 | 文件系统 | 永久 |
+| 运行时状态 | 任务进度、消息记录、执行历史 | SQLite | 会话级/项目级 |
+| 缓存数据 | skill 搜索结果、行业模板缓存 | SQLite + 内存 | 临时 |
 
-# WebSocket 事件
-ws://localhost:3000/events
-  - agent:created
-  - agent:status
-  - task:progress
-  - message:received
-  - workflow:step
+### 数据库表结构
+
+```sql
+-- 智能体表
+CREATE TABLE agents (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    role TEXT,
+    parent_id TEXT,
+    depth INTEGER,
+    status TEXT,
+    workflow_path TEXT,
+    skills TEXT,
+    system_prompt TEXT,
+    created_at TIMESTAMP,
+    metadata TEXT,
+    FOREIGN KEY (parent_id) REFERENCES agents(id)
+);
+
+-- 任务表
+CREATE TABLE tasks (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT,
+    parent_task_id TEXT,
+    title TEXT,
+    description TEXT,
+    status TEXT,
+    priority INTEGER,
+    created_at TIMESTAMP,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    result TEXT,
+    FOREIGN KEY (agent_id) REFERENCES agents(id),
+    FOREIGN KEY (parent_task_id) REFERENCES tasks(id)
+);
+
+-- 消息表
+CREATE TABLE messages (
+    id TEXT PRIMARY KEY,
+    from_agent TEXT,
+    to_agent TEXT,
+    type TEXT,
+    content TEXT,
+    created_at TIMESTAMP
+);
+
+-- 执行检查点
+CREATE TABLE checkpoints (
+    id TEXT PRIMARY KEY,
+    task_id TEXT,
+    step_index INTEGER,
+    state TEXT,
+    created_at TIMESTAMP,
+    FOREIGN KEY (task_id) REFERENCES tasks(id)
+);
+
+-- Skill 缓存
+CREATE TABLE skill_cache (
+    query TEXT PRIMARY KEY,
+    results TEXT,
+    cached_at TIMESTAMP,
+    expires_at TIMESTAMP
+);
+
+-- 创建索引
+CREATE INDEX idx_agents_parent ON agents(parent_id);
+CREATE INDEX idx_agents_depth ON agents(depth);
+CREATE INDEX idx_tasks_agent ON tasks(agent_id);
+CREATE INDEX idx_tasks_status ON tasks(status);
+CREATE INDEX idx_messages_to ON messages(to_agent);
+CREATE INDEX idx_messages_from ON messages(from_agent);
 ```
 
-### UI 功能规划
+---
 
-| 功能 | 说明 | 优先级 |
-|------|------|--------|
-| 智能体树视图 | 可视化组织架构 | P0 |
-| 实时消息流 | 多窗口对话 | P0 |
-| 任务看板 | Kanban 风格管理 | P1 |
-| 进度可视化 | 进度条、状态图标 | P1 |
-| Workflow 图谱 | 动态图谱展示 | P2 |
-| 代码预览 | 实时查看生成代码 | P2 |
-| 多项目管理 | 同时管理多项目 | P3 |
+## 十二、总结
 
-### 技术栈建议
+### 架构优势
 
-| 组件 | 技术选择 |
+| 维度 | 说明 |
+|------|------|
+| **职责清晰** | Super Workflow 管理编排，iFlow SDK 提供 AI 能力 |
+| **功能完整** | 实现设计文档所有核心特性 |
+| **易于维护** | AI 层由 iFlow 统一维护，无需跟进 LLM API 变化 |
+| **灵活扩展** | 可独立升级编排层或 AI 层 |
+
+### 核心特性
+
+| 特性 | 实现方式 |
 |------|----------|
-| 后端框架 | Node.js (Express/Fastify) 或 Python (FastAPI) |
-| 前端框架 | React + TypeScript |
-| 实时通信 | WebSocket (Socket.io) |
-| 数据库 | SQLite (better-sqlite3) |
-| CLI 框架 | Commander.js / oclif |
-| UI 组件库 | Ant Design / shadcn/ui |
+| 按需递归生成智能体 | ✅ AI 生成角色 + AgentTree 管理 |
+| 无限嵌套（最多5层） | ✅ depth 字段 + 层级检查 |
+| 虚拟公司模型 | ✅ 组织架构树 + 角色定义 |
+| 原子化任务分解 | ✅ AI 分析 + Workflow 引擎 |
+| 自动技能发现 | ✅ npx skills + 质量过滤 |
+| 智能体间通信 | ✅ MessageBus + 消息类型 |
+| 状态持久化 | ✅ SQLite + 文件系统 |
+
+### 开发工作量
+
+| 模块 | 预估代码量 | 说明 |
+|------|-----------|------|
+| iFlow SDK 集成 | ~300 行 | AI 能力适配 |
+| AgentTree 管理 | ~400 行 | 递归创建、层级管理 |
+| Workflow 引擎 | ~600 行 | YAML 解析、步骤执行 |
+| MessageBus | ~300 行 | 消息路由、存储 |
+| SQLite 存储 | ~300 行 | 表结构、Repository |
+| CLI 界面 | ~200 行 | 命令解析、交互 |
+| **总计** | **~2100 行** | |
 
 ---
 
-## 十、总结
+## 附录
 
-| 模块 | 核心要点 |
-|------|----------|
-| 架构 | 混合架构：CLI 核心 + 可选服务 + UI 扩展接口 |
-| 存储 | 文件系统（配置）+ SQLite（状态） |
-| 智能体 | 按需递归生成，无限嵌套 |
-| Workflow | YAML 定义，支持分支、并行、子任务 |
-| 通信 | 极简原语 + 多种消息类型 |
-| Skill | 自动发现、自动安装、质量过滤 |
-| CLI | 完整命令集 + 交互模式 |
-| UI | API 预留，渐进式功能规划 |
+### A. 参考资料
 
----
-
-## 附录：参考资料
-
+- [iFlow CLI 文档](https://platform.iflow.cn/cli/) — AI 能力提供
+- [iFlow SDK TypeScript](https://platform.iflow.cn/cli/sdk/sdk-typescript) — SDK 文档
 - [swarm-ide](https://github.com/chmod777john/swarm-ide) — 动态智能体蜂群 IDE
 - [skills.sh](https://skills.sh/) — Agent Skills 生态系统
-- iFlow CLI — 交互式命令行智能体
+
+### B. 版本历史
+
+| 版本 | 日期 | 变更 |
+|------|------|------|
+| 1.0.0 | 2026-03-18 | 初始设计 |
+| 2.0.0 | 2026-03-19 | 集成 iFlow SDK，采用混合架构 |

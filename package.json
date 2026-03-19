@@ -1,0 +1,59 @@
+{
+  "name": "super-workflow",
+  "version": "0.1.0",
+  "description": "基于 iFlow CLI 的动态工作流系统 - 按需生成智能体、动态分配任务、自动发现技能",
+  "type": "module",
+  "main": "dist/cli/index.js",
+  "bin": {
+    "sw": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli/index.js",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src --ext .ts",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "workflow",
+    "agent",
+    "cli",
+    "ai",
+    "automation"
+  ],
+  "author": "LINYF510",
+  "license": "MIT",
+  "dependencies": {
+    "@iflow-ai/iflow-cli-sdk": "^0.2.2",
+    "better-sqlite3": "^11.0.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "inquirer": "^9.2.0",
+    "ora": "^8.0.0",
+    "table": "^6.8.0",
+    "uuid": "^9.0.0",
+    "yaml": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.10",
+    "@types/inquirer": "^9.0.7",
+    "@types/node": "^20.19.37",
+    "@types/uuid": "^9.0.8",
+    "typescript": "^5.9.3",
+    "vitest": "^1.6.1"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LINYF510/super-workflow.git"
+  }
+}
