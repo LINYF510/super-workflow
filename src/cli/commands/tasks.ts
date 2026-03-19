@@ -49,16 +49,24 @@ export const tasksCommand = new Command('tasks')
       const limit = parseInt(options.limit ?? '20', 10);
       tasks = tasks.slice(0, limit);
       
-      closeDatabase();
-      
       // JSON 输出
       if (options.json) {
         console.log(JSON.stringify(tasks, null, 2));
+        closeDatabase();
         return;
       }
       
-      // 表格输出
-      printTaskTable(tasks, agentRepo);
+      // 表格输出 - 在关闭数据库之前获取智能体名称
+      const agentNames = new Map<string, string>();
+      for (const task of tasks) {
+        if (!agentNames.has(task.agentId)) {
+          const agent = agentRepo.findById(task.agentId);
+          agentNames.set(task.agentId, agent?.name ?? task.agentId);
+        }
+      }
+      
+      closeDatabase();
+      printTaskTable(tasks, agentNames);
       
     } catch (error) {
       console.error(chalk.red('查询失败'));
@@ -73,29 +81,19 @@ export const tasksCommand = new Command('tasks')
  */
 function printTaskTable(
   tasks: ReturnType<TaskRepository['findAll']>,
-  agentRepo: AgentRepository
+  agentNames: Map<string, string>
 ): void {
   if (tasks.length === 0) {
     console.log(chalk.gray('暂无任务'));
     return;
   }
   
-  const agentCache = new Map<string, string>();
-  
-  const getAgentName = (agentId: string): string => {
-    if (!agentCache.has(agentId)) {
-      const agent = agentRepo.findById(agentId);
-      agentCache.set(agentId, agent?.name ?? agentId);
-    }
-    return agentCache.get(agentId)!;
-  };
-  
   const data = [
     ['ID', '标题', '智能体', '状态', '优先级', '创建时间'],
     ...tasks.map(task => [
       task.id.substring(0, 8),
       task.title.substring(0, 20) + (task.title.length > 20 ? '...' : ''),
-      getAgentName(task.agentId),
+      agentNames.get(task.agentId) ?? task.agentId,
       formatStatus(task.status),
       formatPriority(task.priority),
       task.createdAt.toLocaleString(),

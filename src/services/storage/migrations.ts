@@ -7,7 +7,7 @@
 import Database from 'better-sqlite3';
 
 /** 当前迁移版本 */
-export const CURRENT_VERSION = 2;
+export const CURRENT_VERSION = 3;
 
 /** 迁移脚本 */
 const migrations: Array<{ version: number; sql: string }> = [
@@ -117,6 +117,16 @@ const migrations: Array<{ version: number; sql: string }> = [
       
       -- 添加层级索引
       CREATE INDEX IF NOT EXISTS idx_agents_depth ON agents(depth);
+    `,
+  },
+  {
+    version: 3,
+    sql: `
+      -- 为 tasks 表添加 updated_at 列
+      ALTER TABLE tasks ADD COLUMN updated_at TEXT;
+      
+      -- 为 messages 表添加 updated_at 列
+      ALTER TABLE messages ADD COLUMN updated_at TEXT;
     `,
   },
 ];

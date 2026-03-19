@@ -20,12 +20,21 @@ export const initCommand = new Command('init')
     const spinner = ora('正在初始化项目...').start();
     
     try {
-      const projectDir = join(process.cwd(), projectName);
+      // 处理 "." 作为项目名的情况
+      const actualProjectName = projectName === '.' 
+        ? process.cwd().split('/').pop() || 'my-project'
+        : projectName;
       
-      // 检查目录是否存在
-      if (existsSync(projectDir) && !options.force) {
-        spinner.fail(chalk.red(`项目目录已存在: ${projectName}`));
-        console.log(chalk.gray('使用 --force 选项强制覆盖'));
+      const projectDir = projectName === '.' 
+        ? process.cwd() 
+        : join(process.cwd(), projectName);
+      
+      const iflowDir = join(projectDir, '.iflow');
+      
+      // 检查是否已初始化（.iflow 目录存在）
+      if (existsSync(iflowDir) && !options.force) {
+        spinner.fail(chalk.red(`项目已初始化: ${actualProjectName}`));
+        console.log(chalk.gray('使用 --force 选项强制重新初始化'));
         process.exit(1);
       }
       
@@ -35,7 +44,6 @@ export const initCommand = new Command('init')
       }
       
       // 创建 .iflow 目录
-      const iflowDir = join(projectDir, '.iflow');
       if (!existsSync(iflowDir)) {
         mkdirSync(iflowDir, { recursive: true });
       }
@@ -46,7 +54,7 @@ export const initCommand = new Command('init')
       
       // 创建项目配置文件
       const projectConfig = {
-        name: projectName,
+        name: actualProjectName,
         description: options.description ?? '',
         version: '1.0.0',
         createdAt: new Date().toISOString(),
@@ -73,12 +81,14 @@ export const initCommand = new Command('init')
       
       closeDatabase();
       
-      spinner.succeed(chalk.green(`项目 ${projectName} 初始化成功！`));
+      spinner.succeed(chalk.green(`项目 ${actualProjectName} 初始化成功！`));
       
       console.log();
       console.log(chalk.bold('下一步:'));
-      console.log(chalk.gray(`  cd ${projectName}`));
-      console.log(chalk.gray('  iflow start'));
+      if (projectName !== '.') {
+        console.log(chalk.gray(`  cd ${projectName}`));
+      }
+      console.log(chalk.gray('  sw start'));
       console.log();
       
     } catch (error) {

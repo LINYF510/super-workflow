@@ -10,7 +10,7 @@ import ora from 'ora';
 import inquirer from 'inquirer';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
-import { initDatabase, closeDatabase } from '../../services/storage/index.js';
+import { initDatabase, closeDatabase, TaskRepository } from '../../services/storage/index.js';
 import { Orchestrator } from '../../core/orchestrator/index.js';
 import { AICapabilityProvider } from '../../services/iflow/index.js';
 
@@ -29,9 +29,16 @@ export const startCommand = new Command('start')
       
       // 检查是否在项目目录中
       const iflowDir = join(projectDir, '.iflow');
-      if (!existsSync(iflowDir)) {
-        spinner.fail(chalk.red('未找到项目配置目录 .iflow/'));
-        console.log(chalk.gray('请先运行 iflow init <project-name> 初始化项目'));
+      const projectConfigPath = join(iflowDir, 'project.json');
+      
+      if (!existsSync(iflowDir) || !existsSync(projectConfigPath)) {
+        spinner.fail(chalk.red('未找到项目配置'));
+        console.log();
+        console.log(chalk.yellow('请先初始化项目:'));
+        console.log(chalk.gray(`  sw init ${options.project || 'my-project'}`));
+        if (!options.project) {
+          console.log(chalk.gray('  或在项目目录中运行: sw init .'));
+        }
         process.exit(1);
       }
       
@@ -43,7 +50,7 @@ export const startCommand = new Command('start')
       
       // 读取项目配置
       const projectConfig = JSON.parse(
-        readFileSync(join(iflowDir, 'project.json'), 'utf-8')
+        readFileSync(projectConfigPath, 'utf-8')
       );
       
       spinner.succeed(chalk.green('项目加载成功'));
@@ -130,12 +137,93 @@ async function interactiveMode(orchestrator: Orchestrator): Promise<void> {
       continue;
     }
     
-    // 分析需求（使用 AI 能力）
+    if (command === 'tasks') {
+      showTasks(orchestrator);
+      continue;
+    }
+    
+    // 处理用户输入
     if (input.trim()) {
-      await handleRequirementAnalysis(orchestrator, input.trim());
+      const agents = orchestrator.getAllAgents();
+      // 如果还没有组织架构（只有主智能体），则分析需求
+      if (agents.length <= 1) {
+        await handleRequirementAnalysis(orchestrator, input.trim());
+      } else {
+        // 已有组织架构，将输入当作任务
+        await handleTaskAssignment(orchestrator, input.trim());
+      }
     }
     
     console.log();
+  }
+}
+
+/**
+ * 处理任务分配
+ */
+async function handleTaskAssignment(orchestrator: Orchestrator, task: string): Promise<void> {
+  const agents = orchestrator.getAllAgents();
+  
+  // 过滤掉主智能体，只显示可分配任务的智能体
+  const workers = agents.filter(a => a.role !== 'orchestrator');
+  
+  if (workers.length === 0) {
+    console.log(chalk.yellow('没有可用的智能体，请先创建组织架构'));
+    return;
+  }
+  
+  console.log();
+  console.log(chalk.bold('选择要分配任务的智能体:'));
+  
+  const choices = workers.map(a => ({
+    name: `${a.name} (${a.role})`,
+    value: a.id,
+  }));
+  
+  choices.push({ name: '自动分配（让 AI 决定）', value: 'auto' });
+  
+  const { agentId } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'agentId',
+      message: '选择智能体:',
+      choices,
+    },
+  ]);
+  
+  const spinner = ora('分配任务中...').start();
+  
+  try {
+    if (agentId === 'auto') {
+      // 自动分配：找到最相关的智能体
+      // 简单实现：分配给第一个空闲的开发类智能体
+      const devAgents = workers.filter(a => 
+        a.role.includes('开发') || a.role.includes('技术') || a.role.includes('前端') || a.role.includes('后端')
+      );
+      const targetAgent = devAgents[0] ?? workers[0];
+      
+      if (!targetAgent) {
+        spinner.fail(chalk.red('没有可用的智能体'));
+        return;
+      }
+      
+      const taskId = await orchestrator.assignTask(targetAgent.id, task);
+      spinner.succeed(chalk.green(`任务已分配给 ${targetAgent.name}`));
+      console.log(chalk.gray(`  任务ID: ${taskId}`));
+    } else {
+      const taskId = await orchestrator.assignTask(agentId, task);
+      const agent = workers.find(a => a.id === agentId);
+      spinner.succeed(chalk.green(`任务已分配给 ${agent?.name ?? '未知'}`));
+      console.log(chalk.gray(`  任务ID: ${taskId}`));
+    }
+    
+    console.log();
+    console.log(chalk.gray('使用 "sw chat <agent-id>" 与智能体对话'));
+    console.log(chalk.gray('使用 "sw tasks" 查看任务状态'));
+    
+  } catch (error) {
+    spinner.fail(chalk.red('任务分配失败'));
+    console.error(error);
   }
 }
 
@@ -214,12 +302,14 @@ function showHelp(): void {
   console.log(chalk.bold('命令:'));
   console.log(chalk.gray('  agents    - 查看所有智能体'));
   console.log(chalk.gray('  tree      - 查看智能体树'));
+  console.log(chalk.gray('  tasks     - 查看任务列表'));
   console.log(chalk.gray('  status    - 查看系统状态'));
   console.log(chalk.gray('  help      - 显示帮助'));
   console.log(chalk.gray('  exit      - 退出程序'));
   console.log();
   console.log(chalk.bold('交互:'));
-  console.log(chalk.gray('  输入项目需求描述，主智能体会分析并建议组织架构'));
+  console.log(chalk.gray('  • 无组织架构时：输入项目需求，系统会分析并建议组织架构'));
+  console.log(chalk.gray('  • 有组织架构后：输入任务描述，系统会引导分配任务'));
   console.log();
 }
 
@@ -276,5 +366,48 @@ function showStatus(orchestrator: Orchestrator): void {
   console.log(chalk.gray(`  智能体数量: ${agents.length}`));
   console.log(chalk.gray(`  活跃: ${agents.filter(a => a.status === 'active').length}`));
   console.log(chalk.gray(`  空闲: ${agents.filter(a => a.status === 'idle').length}`));
+  console.log();
+}
+
+/**
+ * 显示任务列表
+ */
+function showTasks(orchestrator: Orchestrator): void {
+  const taskRepo = new TaskRepository();
+  const agents = orchestrator.getAllAgents();
+  
+  const tasks = taskRepo.findAll({ orderBy: 'created_at', orderDirection: 'DESC' });
+  
+  if (tasks.length === 0) {
+    console.log();
+    console.log(chalk.gray('暂无任务'));
+    console.log();
+    return;
+  }
+  
+  // 构建智能体名称映射
+  const agentNames = new Map<string, string>();
+  for (const agent of agents) {
+    agentNames.set(agent.id, agent.name);
+  }
+  
+  console.log();
+  console.log(chalk.bold(`任务列表 (${tasks.length}):`));
+  console.log();
+  
+  for (const task of tasks.slice(0, 10)) {
+    const status = task.status === 'completed' ? chalk.green('✓') :
+                   task.status === 'running' ? chalk.blue('●') :
+                   task.status === 'failed' ? chalk.red('✗') :
+                   chalk.yellow('○');
+    const agentName = agentNames.get(task.agentId) ?? task.agentId.substring(0, 8);
+    console.log(`  ${status} ${task.title.substring(0, 30)}${task.title.length > 30 ? '...' : ''}`);
+    console.log(chalk.gray(`     智能体: ${agentName} | 状态: ${task.status} | ID: ${task.id.substring(0, 8)}`));
+  }
+  
+  if (tasks.length > 10) {
+    console.log();
+    console.log(chalk.gray(`  ... 还有 ${tasks.length - 10} 个任务`));
+  }
   console.log();
 }
