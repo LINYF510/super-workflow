@@ -1,15 +1,58 @@
 /**
  * Step Executor
  * 
- * 执行工作流步骤
+ * 执行工作流步骤，集成 iFlow SDK 提供 AI 能力
  */
 
 import type { WorkflowStep, WorkflowContext } from '../../types/index.js';
+import { AICapabilityProvider, getAICapabilityProvider } from '../../services/iflow/index.js';
+import { AgentManager } from '../agent/manager.js';
+import type { RoleDefinition } from '../../services/iflow/types.js';
 
 /** 步骤输出 */
 export interface StepOutput extends Record<string, unknown> {
   /** 条件评估结果（用于条件步骤） */
   _conditionResult?: boolean;
+}
+
+/** AI 提供者实例 */
+let aiProvider: AICapabilityProvider | null = null;
+
+/** Agent 管理器实例 */
+let agentManager: AgentManager | null = null;
+
+/**
+ * 设置 AI 提供者
+ */
+export function setExecutorAIProvider(provider: AICapabilityProvider): void {
+  aiProvider = provider;
+}
+
+/**
+ * 获取 AI 提供者
+ */
+function getAIProvider(): AICapabilityProvider {
+  if (!aiProvider) {
+    aiProvider = getAICapabilityProvider();
+  }
+  return aiProvider;
+}
+
+/**
+ * 设置 Agent 管理器
+ */
+export function setExecutorAgentManager(manager: AgentManager): void {
+  agentManager = manager;
+}
+
+/**
+ * 获取 Agent 管理器
+ */
+function getAgentManager(): AgentManager {
+  if (!agentManager) {
+    agentManager = new AgentManager();
+  }
+  return agentManager;
 }
 
 /**
@@ -118,15 +161,28 @@ async function executeInvokeSkill(
     throw new Error(`Step ${step.id} has no skill specified`);
   }
   
-  // TODO: 实际调用 skill
-  // 这里返回模拟结果
-  return {
-    result: {
-      success: true,
-      input,
+  try {
+    // 使用 AI 提供者调用 skill
+    const provider = getAIProvider();
+    await provider.connect();
+    
+    const result = await provider.invokeSkill(step.skill, input);
+    
+    return {
+      result: result.result,
+      success: result.success,
       skill: step.skill,
-    },
-  };
+      error: result.error,
+    };
+  } catch (error) {
+    // 如果 AI 调用失败，返回错误
+    return {
+      result: null,
+      success: false,
+      skill: step.skill,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 /**
@@ -176,22 +232,93 @@ async function executeEvaluate(
 async function executeCreateAgents(
   step: WorkflowStep,
   _input: Record<string, unknown>,
-  _context: WorkflowContext
+  context: WorkflowContext
 ): Promise<StepOutput> {
   if (!step.agents || step.agents.length === 0) {
     return { createdAgents: [] };
   }
   
-  // TODO: 实际创建智能体
-  const createdAgents = step.agents.map((agent) => ({
-    role: agent.role,
-    status: 'created',
-  }));
+  const manager = getAgentManager();
+  const provider = getAIProvider();
+  const createdAgents: Array<{ id: string; role: string; status: string }> = [];
   
-  return {
-    createdAgents,
-    child_outputs: [],
-  };
+  // 获取当前智能体作为父级
+  const parentId = context.agentId;
+  
+  // 检查深度限制
+  if (parentId && !manager.canCreateChild(parentId)) {
+    return {
+      createdAgents: [],
+      error: `Maximum agent depth (${AgentManager.MAX_DEPTH}) exceeded`,
+    };
+  }
+  
+  try {
+    await provider.connect();
+    
+    for (const agentDef of step.agents) {
+      // 使用 AI 生成角色上下文
+      const roleDef: RoleDefinition = {
+        name: agentDef.role,
+        description: agentDef.description ?? `${agentDef.role} 智能体`,
+        responsibilities: agentDef.responsibilities ?? [],
+        requiredSkills: agentDef.skills ?? [],
+      };
+      
+      let systemPrompt = '';
+      try {
+        systemPrompt = await provider.executeWithRole(
+          roleDef,
+          '生成你的角色上下文描述，包括你的职责、工作方式和协作关系。',
+          { agentId: context.agentId, summary: context.taskId ?? '' }
+        );
+      } catch {
+        // 如果 AI 生成失败，使用默认提示
+        systemPrompt = `你是 ${agentDef.role}，负责 ${agentDef.description ?? '执行分配的任务'}。`;
+      }
+      
+      // 创建智能体
+      const createInput: {
+        name: string;
+        role: string;
+        systemPrompt: string;
+        responsibilities: string[];
+        parentId?: string;
+        skills?: string[];
+      } = {
+        name: agentDef.role,
+        role: agentDef.role.toLowerCase().replace(/\s+/g, '-'),
+        systemPrompt,
+        responsibilities: agentDef.responsibilities ?? [],
+      };
+      
+      // 只有在有值时才添加可选属性
+      if (parentId) {
+        createInput.parentId = parentId;
+      }
+      if (agentDef.skills && agentDef.skills.length > 0) {
+        createInput.skills = agentDef.skills;
+      }
+      
+      const agent = manager.createAgent(createInput);
+      
+      createdAgents.push({
+        id: agent.id,
+        role: agent.role,
+        status: agent.status,
+      });
+    }
+    
+    return {
+      createdAgents,
+      count: createdAgents.length,
+    };
+  } catch (error) {
+    return {
+      createdAgents: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 /**
@@ -202,16 +329,40 @@ async function executeAggregate(
   context: WorkflowContext
 ): Promise<StepOutput> {
   // 聚合子任务结果
-  const outputs: unknown[] = [];
+  const outputs: Array<{ role: string; output: unknown }> = [];
   
-  for (const [, output] of context.stepOutputs) {
+  for (const [stepId, output] of context.stepOutputs) {
     if (output.result) {
-      outputs.push(output.result);
+      outputs.push({
+        role: stepId,
+        output: output.result,
+      });
+    }
+  }
+  
+  // 如果有多个结果，使用 AI 进行智能聚合
+  if (outputs.length > 1) {
+    try {
+      const provider = getAIProvider();
+      await provider.connect();
+      
+      const aggregated = await provider.aggregateResults(
+        context.taskId ?? '任务',
+        outputs.map(o => ({ role: o.role, output: String(o.output) }))
+      );
+      
+      return {
+        aggregated,
+        count: outputs.length,
+        originalOutputs: outputs,
+      };
+    } catch {
+      // AI 聚合失败，返回原始结果
     }
   }
   
   return {
-    aggregated: outputs,
+    aggregated: outputs.length === 1 ? outputs[0]?.output : outputs,
     count: outputs.length,
   };
 }

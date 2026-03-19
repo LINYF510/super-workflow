@@ -80,8 +80,15 @@ export interface WorkflowStep {
 
 /** 子智能体定义 */
 export interface SubAgentDefinition {
+  /** 角色名称 */
   role: string;
+  /** 角色描述 */
+  description?: string;
+  /** 职责列表 */
+  responsibilities?: string[];
+  /** 任务列表 */
   tasks: string[];
+  /** 所需技能 */
   skills?: string[];
 }
 
