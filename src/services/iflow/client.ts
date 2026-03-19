@@ -393,19 +393,20 @@ export class AICapabilityProvider {
     const workflows: Set<string> = new Set();
 
     for (const role of roles) {
-      if (role.skills.includes('requirements-analysis')) {
+      const skills = role.skills ?? role.requiredSkills ?? [];
+      if (skills.includes('requirements-analysis')) {
         workflows.add('需求分析工作流');
       }
-      if (role.skills.includes('brainstorming')) {
+      if (skills.includes('brainstorming')) {
         workflows.add('设计协作工作流');
       }
-      if (role.skills.includes('test-driven-development')) {
+      if (skills.includes('test-driven-development')) {
         workflows.add('测试驱动开发工作流');
       }
-      if (role.skills.some(s => s.includes('react') || s.includes('frontend'))) {
+      if (skills.some(s => s.includes('react') || s.includes('frontend'))) {
         workflows.add('前端开发工作流');
       }
-      if (role.skills.some(s => s.includes('api') || s.includes('backend'))) {
+      if (skills.some(s => s.includes('api') || s.includes('backend'))) {
         workflows.add('后端开发工作流');
       }
     }

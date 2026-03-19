@@ -7,9 +7,6 @@
 import { AgentRepository } from '../../services/storage/index.js';
 import type { Agent, CreateAgentInput, AgentStatus } from '../../types/index.js';
 
-/** 最大智能体深度 */
-const MAX_DEPTH = 5;
-
 /**
  * AgentManager 类
  */
@@ -24,11 +21,10 @@ export class AgentManager {
    * 创建智能体
    */
   createAgent(input: CreateAgentInput): Agent {
-    // 检查父级深度
+    // 检查父级深度限制
     if (input.parentId) {
-      const parentDepth = this.agentRepo.getAgentDepth(input.parentId);
-      if (parentDepth >= MAX_DEPTH) {
-        throw new Error(`Maximum agent depth (${MAX_DEPTH}) exceeded`);
+      if (!this.agentRepo.canCreateChild(input.parentId)) {
+        throw new Error(`Maximum agent depth (${AgentRepository.MAX_DEPTH}) exceeded`);
       }
     }
     
@@ -118,6 +114,27 @@ export class AgentManager {
   }
   
   /**
+   * 设置 AI 角色上下文
+   */
+  setSystemPrompt(agentId: string, prompt: string): Agent | null {
+    return this.agentRepo.setSystemPrompt(agentId, prompt);
+  }
+  
+  /**
+   * 检查是否可以在该智能体下创建子智能体
+   */
+  canCreateChild(parentId: string): boolean {
+    return this.agentRepo.canCreateChild(parentId);
+  }
+  
+  /**
+   * 获取智能体深度
+   */
+  getAgentDepth(id: string): number {
+    return this.agentRepo.getAgentDepth(id);
+  }
+  
+  /**
    * 激活智能体
    */
   activateAgent(id: string): Agent | null {
@@ -143,5 +160,12 @@ export class AgentManager {
     
     // 终止当前智能体
     this.updateStatus(id, 'terminated');
+  }
+  
+  /**
+   * 获取最大深度限制
+   */
+  static get MAX_DEPTH(): number {
+    return AgentRepository.MAX_DEPTH;
   }
 }

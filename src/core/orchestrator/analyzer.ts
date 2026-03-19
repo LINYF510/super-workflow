@@ -2,11 +2,13 @@
  * Requirements Analyzer
  * 
  * 分析项目需求，识别行业领域和职位角色
+ * 使用 iFlow SDK 提供 AI 能力
  */
 
+import { AICapabilityProvider, getAICapabilityProvider } from '../../services/iflow/index.js';
 import type { AnalysisResult, RoleDefinition, OrgStructure } from './index.js';
 
-/** 行业关键词映射 */
+/** 行业关键词映射（备用） */
 const INDUSTRY_KEYWORDS: Record<string, string[]> = {
   '电商': ['电商', '购物', '订单', '商品', '支付', '物流', '购物车', '结算'],
   '金融': ['金融', '银行', '投资', '理财', '股票', '基金', '贷款', '风控'],
@@ -18,7 +20,7 @@ const INDUSTRY_KEYWORDS: Record<string, string[]> = {
   '工具': ['工具', '效率', '笔记', '日历', '任务', '提醒', '同步', '备份'],
 };
 
-/** 职位角色模板 */
+/** 职位角色模板（备用） */
 const ROLE_TEMPLATES: Record<string, RoleDefinition[]> = {
   '电商': [
     {
@@ -77,10 +79,77 @@ const ROLE_TEMPLATES: Record<string, RoleDefinition[]> = {
   ],
 };
 
+/** AI 提供者实例 */
+let aiProvider: AICapabilityProvider | null = null;
+
 /**
- * 分析项目需求
+ * 设置 AI 提供者
+ */
+export function setAIProvider(provider: AICapabilityProvider): void {
+  aiProvider = provider;
+}
+
+/**
+ * 获取 AI 提供者
+ */
+export function getAIProvider(): AICapabilityProvider {
+  if (!aiProvider) {
+    aiProvider = getAICapabilityProvider();
+  }
+  return aiProvider;
+}
+
+/**
+ * 分析项目需求（使用 AI 能力）
  */
 export async function analyzeRequirements(description: string): Promise<AnalysisResult> {
+  try {
+    // 尝试使用 AI 分析
+    const provider = getAIProvider();
+    await provider.connect();
+    
+    const result = await provider.analyzeRequirements(description);
+    
+    // 如果 AI 返回了角色定义，转换为本地格式
+    if (result.roles && result.roles.length > 0) {
+      const roles: RoleDefinition[] = result.roles.map(role => {
+        const mapped: RoleDefinition = {
+          name: role.name,
+          description: role.description,
+          responsibilities: role.responsibilities,
+          requiredSkills: role.requiredSkills ?? role.skills ?? [],
+        };
+        if (role.parent) {
+          mapped.parent = role.parent;
+        }
+        if (role.optionalSkills) {
+          mapped.optionalSkills = role.optionalSkills;
+        }
+        if (role.systemPrompt) {
+          mapped.systemPrompt = role.systemPrompt;
+        }
+        return mapped;
+      });
+      
+      return {
+        industry: result.industry,
+        roles,
+        orgStructure: buildOrgStructureFromRoles(roles),
+        suggestedWorkflows: result.suggestedWorkflows,
+      };
+    }
+  } catch (error) {
+    console.warn('AI analysis failed, falling back to keyword-based analysis:', error);
+  }
+  
+  // 备用：基于关键词的分析
+  return analyzeRequirementsFallback(description);
+}
+
+/**
+ * 基于关键词的备用分析
+ */
+function analyzeRequirementsFallback(description: string): AnalysisResult {
   // 识别行业领域
   const industry = identifyIndustry(description);
   
@@ -129,6 +198,22 @@ function identifyIndustry(description: string): string {
  */
 function getRolesForIndustry(industry: string): RoleDefinition[] {
   return ROLE_TEMPLATES[industry] ?? ROLE_TEMPLATES['default']!;
+}
+
+/**
+ * 从角色列表构建组织架构
+ */
+function buildOrgStructureFromRoles(roles: RoleDefinition[]): OrgStructure {
+  const reportingLines = roles.map((role) => ({
+    from: role.name,
+    to: role.parent ?? null,
+  }));
+  
+  return {
+    name: '项目团队',
+    roles,
+    reportingLines,
+  };
 }
 
 /**

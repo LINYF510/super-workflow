@@ -8,16 +8,22 @@ import type { MessageType } from '@iflow-ai/iflow-cli-sdk';
 
 /** 角色定义 - AI 生成的职位描述 */
 export interface RoleDefinition {
+  /** 角色标识 */
+  id?: string;
   /** 角色名称 */
   name: string;
   /** 角色描述 */
   description: string;
   /** 职责列表 */
   responsibilities: string[];
-  /** 所需技能 */
-  skills: string[];
+  /** 必需技能 */
+  requiredSkills?: string[];
+  /** 可选技能 */
+  optionalSkills?: string[];
+  /** 技能列表（别名，兼容旧代码） */
+  skills?: string[];
   /** AI 角色上下文（系统提示词） */
-  systemPrompt: string;
+  systemPrompt?: string;
   /** 上级角色名称 */
   parent?: string;
   /** 下级角色名称列表 */

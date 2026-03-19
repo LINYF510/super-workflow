@@ -47,6 +47,8 @@ export function buildRoleExecutionPrompt(
     ? `\n上下文信息：\n${contextSummary}\n`
     : '';
 
+  const skills = role.skills ?? role.requiredSkills ?? [];
+
   return `你现在扮演: ${role.name}
 
 角色描述: ${role.description}
@@ -54,7 +56,7 @@ export function buildRoleExecutionPrompt(
 职责:
 ${role.responsibilities.map(r => `- ${r}`).join('\n')}
 
-专业技能: ${role.skills.join(', ')}
+专业技能: ${skills.join(', ')}
 ${contextSection}
 任务: ${task}
 
