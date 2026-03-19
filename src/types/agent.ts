@@ -31,10 +31,14 @@ export interface Agent {
   role: string;
   /** 上级智能体 ID */
   parentId: string | null;
+  /** 层级深度（0 为根节点，最大 5） */
+  depth: number;
   /** 当前状态 */
   status: AgentStatus;
   /** 工作流文件路径 */
   workflowPath: string | null;
+  /** AI 角色上下文（动态生成的 system prompt） */
+  systemPrompt: string | null;
   /** 已安装的 skills */
   skills: string[];
   /** 职责列表 */
@@ -52,6 +56,8 @@ export interface CreateAgentInput {
   name: string;
   role: string;
   parentId?: string;
+  depth?: number;
+  systemPrompt?: string;
   responsibilities?: string[];
   skills?: string[];
   metadata?: Record<string, unknown>;

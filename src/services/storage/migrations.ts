@@ -6,9 +6,8 @@
 
 import Database from 'better-sqlite3';
 
-/** 当前迁移版本（用于版本检查） */
-// @ts-expect-error - Reserved for future version checking
-const _CURRENT_VERSION = 1;
+/** 当前迁移版本 */
+export const CURRENT_VERSION = 2;
 
 /** 迁移脚本 */
 const migrations: Array<{ version: number; sql: string }> = [
@@ -105,6 +104,19 @@ const migrations: Array<{ version: number; sql: string }> = [
       CREATE INDEX IF NOT EXISTS idx_messages_to_agent ON messages(to_agent);
       CREATE INDEX IF NOT EXISTS idx_messages_task_id ON messages(task_id);
       CREATE INDEX IF NOT EXISTS idx_checkpoints_task_id ON checkpoints(task_id);
+    `,
+  },
+  {
+    version: 2,
+    sql: `
+      -- 添加层级深度字段（用于限制最大递归深度为 5 层）
+      ALTER TABLE agents ADD COLUMN depth INTEGER DEFAULT 0;
+      
+      -- 添加 AI 角色上下文字段（动态生成的 system prompt）
+      ALTER TABLE agents ADD COLUMN system_prompt TEXT;
+      
+      -- 添加层级索引
+      CREATE INDEX IF NOT EXISTS idx_agents_depth ON agents(depth);
     `,
   },
 ];

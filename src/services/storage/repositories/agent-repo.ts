@@ -14,8 +14,10 @@ interface _AgentRow {
   name: string;
   role: string;
   parent_id: string | null;
+  depth: number;
   status: AgentStatus;
   workflow_path: string | null;
+  system_prompt: string | null;
   skills: string;
   responsibilities: string;
   metadata: string;
@@ -34,8 +36,10 @@ export class AgentRepository extends BaseRepository<Agent, CreateAgentInput> {
     name: 'name',
     role: 'role',
     parentId: 'parent_id',
+    depth: 'depth',
     status: 'status',
     workflowPath: 'workflow_path',
+    systemPrompt: 'system_prompt',
     skills: 'skills',
     responsibilities: 'responsibilities',
     metadata: 'metadata',
@@ -49,8 +53,10 @@ export class AgentRepository extends BaseRepository<Agent, CreateAgentInput> {
       name: row.name as string,
       role: row.role as string,
       parentId: row.parent_id as string | null,
+      depth: (row.depth as number) ?? 0,
       status: row.status as AgentStatus,
       workflowPath: row.workflow_path as string | null,
+      systemPrompt: row.system_prompt as string | null,
       skills: JSON.parse(row.skills as string) as string[],
       responsibilities: JSON.parse(row.responsibilities as string) as string[],
       metadata: JSON.parse(row.metadata as string) as Record<string, unknown>,
@@ -66,8 +72,10 @@ export class AgentRepository extends BaseRepository<Agent, CreateAgentInput> {
     if (entity.name !== undefined) row.name = entity.name;
     if (entity.role !== undefined) row.role = entity.role;
     if (entity.parentId !== undefined) row.parent_id = entity.parentId;
+    if (entity.depth !== undefined) row.depth = entity.depth;
     if (entity.status !== undefined) row.status = entity.status;
     if (entity.workflowPath !== undefined) row.workflow_path = entity.workflowPath;
+    if (entity.systemPrompt !== undefined) row.system_prompt = entity.systemPrompt;
     if (entity.skills !== undefined) row.skills = JSON.stringify(entity.skills);
     if (entity.responsibilities !== undefined) row.responsibilities = JSON.stringify(entity.responsibilities);
     if (entity.metadata !== undefined) row.metadata = JSON.stringify(entity.metadata);
@@ -79,13 +87,26 @@ export class AgentRepository extends BaseRepository<Agent, CreateAgentInput> {
   
   protected buildEntity(input: CreateAgentInput): Agent {
     const now = new Date();
+    
+    // 计算层级深度
+    let depth = input.depth ?? 0;
+    if (input.parentId && input.depth === undefined) {
+      // 如果没有显式指定深度，则从父节点计算
+      const parent = this.findById(input.parentId);
+      if (parent) {
+        depth = parent.depth + 1;
+      }
+    }
+    
     return {
       id: this.generateId(),
       name: input.name,
       role: input.role,
       parentId: input.parentId ?? null,
+      depth,
       status: 'idle',
       workflowPath: null,
+      systemPrompt: input.systemPrompt ?? null,
       skills: input.skills ?? [],
       responsibilities: input.responsibilities ?? [],
       metadata: input.metadata ?? {},
@@ -137,14 +158,11 @@ export class AgentRepository extends BaseRepository<Agent, CreateAgentInput> {
   }
   
   /**
-   * 获取智能体深度
+   * 获取智能体深度（直接从存储字段读取）
    */
   getAgentDepth(id: string): number {
     const agent = this.findById(id);
-    if (!agent || !agent.parentId) {
-      return 0;
-    }
-    return 1 + this.getAgentDepth(agent.parentId);
+    return agent?.depth ?? 0;
   }
   
   /**
@@ -182,4 +200,24 @@ export class AgentRepository extends BaseRepository<Agent, CreateAgentInput> {
     const skills = agent.skills.filter((s: string) => s !== skill);
     return this.update(id, { skills });
   }
+  
+  /**
+   * 设置 AI 角色上下文
+   */
+  setSystemPrompt(id: string, prompt: string): Agent | null {
+    return this.update(id, { systemPrompt: prompt });
+  }
+  
+  /**
+   * 检查是否可以在该智能体下创建子智能体
+   * 最大深度限制为 5 层
+   */
+  canCreateChild(parentId: string): boolean {
+    const parent = this.findById(parentId);
+    if (!parent) return false;
+    return parent.depth < AgentRepository.MAX_DEPTH;
+  }
+  
+  /** 最大层级深度 */
+  static readonly MAX_DEPTH = 5;
 }
